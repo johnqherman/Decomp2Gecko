@@ -1,0 +1,17 @@
+#pragma once
+
+#ifndef DECOMP2GECKO_GIT_HASH
+#define DECOMP2GECKO_GIT_HASH "unknown"
+#endif
+
+#ifndef DECOMP2GECKO_BUILD_DATE
+#define DECOMP2GECKO_BUILD_DATE "unknown"
+#endif
+
+namespace Decomp2Gecko {
+
+inline constexpr const char* VERSION_STRING = "@PROJECT_VERSION@";
+inline constexpr const char* GIT_HASH = DECOMP2GECKO_GIT_HASH;
+inline constexpr const char* BUILD_DATE = DECOMP2GECKO_BUILD_DATE;
+
+} // namespace Decomp2Gecko

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Decomp2Gecko
+GenericName=Gecko Code Generator
+Comment=Turn decomp source mods into Gecko codes for the vanilla DOL
+Exec=Decomp2Gecko-gui
+Icon=Decomp2Gecko
+Categories=Development;
+Terminal=false
+StartupWMClass=Decomp2Gecko-gui

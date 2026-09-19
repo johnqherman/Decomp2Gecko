@@ -1,0 +1,11 @@
+<RCC version="1.0">
+    <qresource prefix="/icons">
+        <file alias="16.png">hicolor/16x16/apps/Decomp2Gecko.png</file>
+        <file alias="24.png">hicolor/24x24/apps/Decomp2Gecko.png</file>
+        <file alias="32.png">hicolor/32x32/apps/Decomp2Gecko.png</file>
+        <file alias="48.png">hicolor/48x48/apps/Decomp2Gecko.png</file>
+        <file alias="64.png">hicolor/64x64/apps/Decomp2Gecko.png</file>
+        <file alias="128.png">hicolor/128x128/apps/Decomp2Gecko.png</file>
+        <file alias="256.png">hicolor/256x256/apps/Decomp2Gecko.png</file>
+    </qresource>
+</RCC>

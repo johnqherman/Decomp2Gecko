@@ -1,0 +1,231 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build core + tests (no Qt)
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DDECOMP2GECKO_BUILD_GUI=OFF -DDECOMP2GECKO_WERROR=ON
+          cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  linux:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check tag matches project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER=$(sed -n 's/^project(.*VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "$TAG" != "$VER" ]; then
+            echo "::error::Tag v${TAG} != project VERSION ${VER}"
+            exit 1
+          fi
+
+      - name: Install system deps
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list
+          sudo apt-get update && sudo apt-get install -y ninja-build libfuse2
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: linux-${{ hashFiles('**/CMakeLists.txt') }}
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr -DDECOMP2GECKO_WERROR=ON \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Create AppImage
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          DESTDIR=$GITHUB_WORKSPACE/AppDir cmake --install build
+          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy*.AppImage
+          export QMAKE=$(which qmake6 2>/dev/null || which qmake)
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
+          mv Decomp2Gecko*.AppImage Decomp2Gecko-linux-x86_64.AppImage
+
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: linux-x86_64
+          path: Decomp2Gecko-linux-x86_64.AppImage
+
+  windows:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check tag matches project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER=$(sed -n 's/^project(.*VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "$TAG" != "$VER" ]; then
+            echo "::error::Tag v${TAG} != project VERSION ${VER}"
+            exit 1
+          fi
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+
+      - name: Install Ninja
+        run: choco install ninja -y --no-progress
+
+      - name: Install NSIS
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            choco install nsis -y --no-progress
+            if (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") { break }
+            Write-Host "NSIS not found after attempt $i; retrying..."
+            Start-Sleep -Seconds 15
+          }
+          if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) {
+            throw "NSIS install failed"
+          }
+
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: windows-${{ hashFiles('**/CMakeLists.txt') }}
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDECOMP2GECKO_WERROR=ON -DDECOMP2GECKO_DEPLOY_QT=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Package
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
+          cd build
+          cpack -G "NSIS;ZIP"
+
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: windows-x64
+          path: |
+            build/Decomp2Gecko-*.exe
+            build/Decomp2Gecko-*.zip
+
+  macos:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check tag matches project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER=$(sed -n 's/^project(.*VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "$TAG" != "$VER" ]; then
+            echo "::error::Tag v${TAG} != project VERSION ${VER}"
+            exit 1
+          fi
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+          host: mac
+          target: desktop
+          arch: clang_64
+
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: macos-universal-${{ hashFiles('**/CMakeLists.txt') }}
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DDECOMP2GECKO_WERROR=ON -DDECOMP2GECKO_DEPLOY_QT=ON \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Verify universal binary
+        run: |
+          lipo -info build/src/gui/Decomp2Gecko-gui.app/Contents/MacOS/Decomp2Gecko-gui
+          lipo -info build/src/gui/Decomp2Gecko-gui.app/Contents/MacOS/Decomp2Gecko-gui | grep -q x86_64
+          lipo -info build/src/gui/Decomp2Gecko-gui.app/Contents/MacOS/Decomp2Gecko-gui | grep -q arm64
+
+      - name: Package
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cd build && cpack -G DragNDrop
+
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: macos-universal
+          path: build/Decomp2Gecko-*.dmg
+
+  release:
+    needs: [linux, windows, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+      - uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            **/Decomp2Gecko-*
